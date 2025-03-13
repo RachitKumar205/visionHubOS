@@ -11,14 +11,36 @@ use esp_idf_hal::{
     prelude::*,
 };
 
+use ssd1306::mode::BufferedGraphicsMode;
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use std::sync::{Arc, Mutex};
+use std::error::Error;
+use std::fmt;
 
 #[derive(Debug)]
 pub enum DisplayError {
     DriverError,
     DrawError,
-    I2CError(esp_idf_hal::i2c::I2CError),
+    I2CError(esp_idf_hal::i2c::I2cError),
+}
+
+impl fmt::Display for DisplayError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DisplayError::DriverError => write!(f, "Display driver initialisation error"),
+            DisplayError::DrawError => write!(f, "Error drawing to display"),
+            DisplayError::I2CError(e) => write!(f, "I2C Communication error: {}", e),
+        }
+    }
+}
+
+impl Error for DisplayError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            DisplayError::I2CError(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 impl From<esp_idf_hal::i2c::I2cError> for DisplayError {
@@ -38,7 +60,7 @@ pub struct DisplayManager {
 }
 
 impl DisplayManager {
-    pub fn new(i2c: I2cDrive<'static>) -> Result<Self, DisplayError> {
+    pub fn new(i2c: I2cDriver<'static>) -> Result<Self, DisplayError> {
         let interface = I2CDisplayInterface::new(i2c);
 
         let mut display = Ssd1306::new(
@@ -69,7 +91,8 @@ impl DisplayManager {
     }
 
     pub fn draw_text(&self, text:&str, x: i32, y: i32, size: TextSize) -> Result<(), DisplayError> {
-        let mut display = self.display.lock().unwrap();
+        let mut display_guard = self.display.lock().unwrap();
+        let display = &mut *display_guard;
 
         let font = match size {
             TextSize::Small => &FONT_6X10,
@@ -82,33 +105,35 @@ impl DisplayManager {
             .text_color(BinaryColor::On)
             .build();
 
-        Text::with_baseline(
+        let text_obj = Text::with_baseline(
             text,
             Point::new(x, y),
             text_style,
             Baseline::Top,
-        )
-        .draw(&mut *display)
+        );
+            
+        text_obj.draw(display)
         .map_err(|_| DisplayError::DrawError)?;
 
         Ok(())
     }
 
     pub fn draw_rectangle(&self, x: i32, y:i32, width: u32, height: u32, filled: bool) -> Result<(), DisplayError> {
-        let mut display = self.display.lock().unwrap();
+        let mut display_guard = self.display.lock().unwrap();
+        let display = &mut *display_guard;
 
-        let rect = Rectange::new(
+        let rect = Rectangle::new(
             Point::new(x, y),
-            Size::new(widht, height),
+            Size::new(width, height),
         );
 
         if filled {
             rect.into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
-                .draw(&mut display)
+                .draw(display)
                 .map_err(|_| DisplayError::DrawError)?;
         } else {
             rect.into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
-                .draw(&mut display)
+                .draw(display)
                 .map_err(|_| DisplayError::DrawError)?;
         }
 
@@ -135,6 +160,7 @@ impl DisplayManager {
 
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum TextSize {
     Small,
     Normal,

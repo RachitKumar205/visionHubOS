@@ -1,142 +1,86 @@
-use embedded_graphics::{
-    mono_font::{ascii::FONT_6X10, MonoTextStyleBuilder},
-    pixelcolor::BinaryColor,
-    prelude::*,
-    text::{Baseline, Text},
-};
+
+mod drivers;
+mod ui;
+mod system;
+
+use crate::drivers::display::DisplayManager;
+use crate::ui::framework::ScreenManager;
+use crate::ui::framework::Screen;
+use crate::ui::screens::loading::LoadingScreen;
+use crate::ui::screens::home::HomeScreen;
+use crate::system::events::{EventQueue, ButtonEventSource, SystemTickSource};
+
 use esp_idf_hal::{
     delay::FreeRtos,
     gpio::PinDriver,
     i2c::{I2cConfig, I2cDriver},
     prelude::*,
 };
-use esp_idf_sys as _;
-use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
+use esp_idf_svc::log::EspLogger;
+use std::sync::Arc;
+use std::time::Duration;
 
-// Use a custom error wrapper to handle DisplayError
-#[derive(Debug)]
-enum AppError {
-    DisplayError,
-    EspError(esp_idf_sys::EspError),
-    // Add other error types as needed
-}
+fn main() -> anyhow::Result<()> {
+    EspLogger::initialize_default();
+    log::info!("Starting visionHubOS");
 
-// Implement conversion from esp_idf_sys::EspError
-impl From<esp_idf_sys::EspError> for AppError {
-    fn from(error: esp_idf_sys::EspError) -> Self {
-        AppError::EspError(error)
-    }
-}
-
-// Implement conversion from DisplayError
-impl From<display_interface::DisplayError> for  AppError {
-    fn from(_: display_interface::DisplayError) -> Self {
-        AppError::DisplayError
-    }
-}
-
-fn main() -> Result<(), AppError> {
-    // Initialize logger
-    esp_idf_svc::log::EspLogger::initialize_default();
-    log::info!("Starting ESP32 Server Remote");
-    // Get peripherals
     let peripherals = Peripherals::take()?;
-    
-    // Configure I2C
-    // Note: Adjust these pin numbers based on your wiring
+
     let sda = peripherals.pins.gpio21;
     let scl = peripherals.pins.gpio19;
     let i2c = peripherals.i2c0;
-    
-    // Configure I2C with 400kHz clock
     let config = I2cConfig::new().baudrate(400.kHz().into());
     let i2c_driver = I2cDriver::new(i2c, sda, scl, &config)?;
-    
-    // Configure display interface
-    let interface = I2CDisplayInterface::new(i2c_driver);
-    
-    // Create display object with dimensions 128x64
-    // If your display has different dimensions, adjust accordingly
-    let mut display = Ssd1306::new(
-        interface,
-        DisplaySize128x64,
-        DisplayRotation::Rotate180,
-    )
-    .into_buffered_graphics_mode();
-    
-    // Initialize display
-    display.init()?;
-    display.clear(BinaryColor::Off)?;
-    
-    // Configure button(s)
-    // Example with a button connected to GPIO0
-    let mut button = PinDriver::input(peripherals.pins.gpio26)?;
-    button.set_pull(esp_idf_hal::gpio::Pull::Up)?;
-    
-    // Configure text style
-    let text_style = MonoTextStyleBuilder::new()
-        .font(&FONT_6X10)
-        .text_color(BinaryColor::On)
-        .build();
-    
-    // Draw initial text
-    Text::with_baseline(
-        "Services online",
-        Point::new(0, 16),
-        text_style,
-        Baseline::Top,
-    )
-    .draw(&mut display)?;
-    
-    Text::with_baseline(
-        "System ready to go",
-        Point::new(0, 32),
-        text_style,
-        Baseline::Top,
-    )
-    .draw(&mut display)?;
-    
-    // Update display
-    display.flush()?;
-    
-    // Main loop
-    let mut counter = 0;
-    loop {
-        // Check button state
-        if button.is_low() {
-            // Button pressed
-            counter += 1;
-            
-            // Clear display area for counter
-            display.clear(BinaryColor::Off)?;
-            
-            // Redraw title
-            Text::with_baseline(
-                "ESP32 Server Remote",
-                Point::new(0, 16),
-                text_style,
-                Baseline::Top,
-            )
-            .draw(&mut display)?;
-            
-            // Update counter text
-            let counter_text = format!("Button presses: {}", counter);
-            Text::with_baseline(
-                &counter_text,
-                Point::new(0, 32),
-                text_style,
-                Baseline::Top,
-            )
-            .draw(&mut display)?;
-            
-            // Update display
-            display.flush()?;
-            
-            // Debounce
-            FreeRtos::delay_ms(300);
+
+    let mut scroll_pin = PinDriver::input(peripherals.pins.gpio25)?;
+    let mut select_pin = PinDriver::input(peripherals.pins.gpio26)?;
+    scroll_pin.set_pull(esp_idf_hal::gpio::Pull::Up)?;
+    select_pin.set_pull(esp_idf_hal::gpio::Pull::Up)?;
+
+    let display_manager = Arc::new(DisplayManager::new(i2c_driver)?);
+
+    let event_queue = Arc::new(EventQueue::new());
+
+    let mut scroll_button_source = ButtonEventSource::new(scroll_pin, 25, event_queue.clone());
+    let mut select_button_source = ButtonEventSource::new(select_pin, 26, event_queue.clone());
+
+    let mut loading_screen = LoadingScreen::new(display_manager.clone(), "visionHubOS", "Booting...");
+
+    let mut screen_manager = ScreenManager::new(display_manager.clone(), event_queue.get_queue_clone());
+
+    screen_manager.add_screen(loading_screen);
+
+    screen_manager.switch_to_screen(0)?;
+
+    for i in 0..=100 {
+         let message = match i {
+            0..=20 => "Initialising hardware...",
+            21..=40 => "Loading drivers...",
+            41..=60 => "Starting services...",
+            61..=80 => "Initialising UI...",
+            _ => "Almost ready...",
+        };
+
+        if let Some(screen) = screen_manager.get_screen_as_mut::<LoadingScreen>() {
+            screen.set_message(message);
+            screen.set_progress(i);
+            screen.draw()?;
         }
-        
-        // Small delay to prevent busy waiting
-        FreeRtos::delay_ms(50);
+
+        FreeRtos::delay_ms(30);
+    }
+    
+    let home_screen = HomeScreen::new(display_manager.clone());
+    screen_manager.add_screen(home_screen);
+
+    screen_manager.switch_to_screen(1)?;
+
+    loop {
+        scroll_button_source.poll();
+        select_button_source.poll();
+
+        screen_manager.process_events()?;
+
+        FreeRtos::delay_ms(10);
     }
 }

@@ -31,7 +31,7 @@ impl InputManager {
         }
     }
 
-    pub fn register_button<P: Pin>(&self, pin: PinDriver<'_, P, Input>, pin_number: u32) -> Result<(), InputError> {
+    pub fn register_button<P: Pin>(&self, pin: &PinDriver<'_, P, Input>, pin_number: u32) -> Result<(), InputError> {
         let mut states = self.button_states.lock().unwrap();
         states.insert(pin_number, if pin.is_high() {ButtonState::Released} else {ButtonState::Pressed});
         Ok(())
@@ -80,7 +80,7 @@ impl<'a> ButtonPoller<'a> {
     }
 
     pub fn add_button(&mut self, pin: PinDriver<'a, AnyIOPin, Input>, pin_number: u32) {
-        let _ = self.input_manager.register_button(pin.clone(), pin_number);
+        let _ = self.input_manager.register_button(&pin, pin_number);
         self.buttons.push((pin, pin_number));
     }
 

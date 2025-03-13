@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use std::sync::{Arc, Mutex};
 use crate::system::events::{Event, EventQueue};
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 struct ScheduledTask {
     id: u32,
     next_run: Instant,
@@ -12,14 +12,24 @@ struct ScheduledTask {
     callback: Arc<dyn Fn() + Send + Sync>,
 }
 
+impl PartialEq for ScheduledTask {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id &&
+        self.next_run == other.next_run &&
+        self.interval == other.interval
+    }
+}
+
+impl Eq for ScheduledTask {}
+
 impl Ord for ScheduledTask {
-    fn cmp(&self, other: &self) -> Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         other.next_run.cmp(&self.next_run)
     }
 }
 
 impl PartialOrd for ScheduledTask {
-    fm partial_cmp(&self, other: &self) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -59,7 +69,7 @@ impl Scheduler {
         task_id
     }
 
-    pub fn schedule_recurring<F>(&mut self, delay: Duration, callback: F) -> u32
+    pub fn schedule_recurring<F>(&mut self, delay: Duration, interval: Duration, callback: F) -> u32
     where 
         F: Fn() + Send + Sync + 'static,
     {
@@ -68,7 +78,7 @@ impl Scheduler {
 
         let task = ScheduledTask {
             id: task_id,
-            next_run: Instant::now + delay,
+            next_run: Instant::now() + delay,
             interval: Some(interval),
             callback: Arc::new(callback),
         };
@@ -108,12 +118,12 @@ impl Scheduler {
 
                     (task.callback)();
 
-                    self.event_queue.push(Event::Timer(task_id));
+                    self.event_queue.push(Event::Timer(task.id));
 
                     if let Some(interval) = task.interval {
                         tasks_to_reschedule.push(ScheduledTask {
                             id: task.id,
-                            next_run: Instant::now + interval,
+                            next_run: Instant::now() + interval,
                             interval: Some(interval),
                             callback: task.callback,
                         });

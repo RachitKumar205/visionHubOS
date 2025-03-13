@@ -30,7 +30,7 @@ impl EventQueue {
         queue.push_back(event);
     }
 
-    pub fn pop(&self) -> Option(Event) {
+    pub fn pop(&self) -> Option<Event> {
         let mut queue = self.queue.lock().unwrap();
         queue.pop_front()
     }
@@ -65,7 +65,7 @@ impl <'a, T: Pin> ButtonEventSource<'a, T> {
             event_queue,
             last_state: true,
             debounce_time: Duration::from_millis(50),
-            last_evemt: Instant::now(),
+            last_event: Instant::now(),
         }
     }
 
@@ -74,7 +74,7 @@ impl <'a, T: Pin> ButtonEventSource<'a, T> {
         let current_state = self.pin.is_high();
         let now = Instant::now();
 
-        if now.duraction_since(self.last_event) >= self.debounce_time {
+        if now.duration_since(self.last_event) >= self.debounce_time {
             if current_state != self.last_state {
 
                 if current_state {
@@ -115,7 +115,7 @@ impl TimerEventSource {
     pub fn poll(&mut self) {
         let now = Instant::now();
 
-        if now.duraction_since(self.last_triggered) >= self.interval {
+        if now.duration_since(self.last_triggered) >= self.interval {
             self.event_queue.push(Event::Timer(self.timer_id));
             self.last_triggered = now;
         }

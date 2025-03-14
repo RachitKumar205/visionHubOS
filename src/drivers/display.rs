@@ -61,8 +61,9 @@ pub struct DisplayManager {
 
 impl DisplayManager {
     pub fn new(i2c: I2cDriver<'static>) -> Result<Self, DisplayError> {
-        let interface = I2CDisplayInterface::new(i2c);
+        let interface = I2CDisplayInterface::new_custom_address(i2c, 0x3C);
 
+        log::info!("Creating display...");
         let mut display = Ssd1306::new(
             interface,
             DisplaySize128x64,
@@ -70,8 +71,22 @@ impl DisplayManager {
         )
         .into_buffered_graphics_mode();
 
-        display.init().map_err(|_| DisplayError::DriverError)?;
-        display.clear(BinaryColor::Off).map_err(|_| DisplayError::DrawError)?;
+        log::info!("Initializing display...");
+        match display.init() {
+            Ok(_) => log::info!("Display initialised successfully"),
+            Err(e) => {
+                log::error!("Display initialisation failed: {:?}", e);
+                return Err(DisplayError::DriverError);
+            }
+        }
+        
+        match display.clear(BinaryColor::Off) {
+            Ok(_) => log::info!("Display cleared successfully"),
+            Err(e) => {
+                log::error!("Display clear failed: {:?}", e);
+                return Err(DisplayError::DrawError);
+            }
+        }
 
         Ok(Self {
             display: Arc::new(Mutex::new(display)),

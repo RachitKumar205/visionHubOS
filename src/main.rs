@@ -29,7 +29,7 @@ fn main() -> anyhow::Result<()> {
     let sda = peripherals.pins.gpio21;
     let scl = peripherals.pins.gpio19;
     let i2c = peripherals.i2c0;
-    let config = I2cConfig::new().baudrate(400.kHz().into());
+    let config = I2cConfig::new().baudrate(100.kHz().into());
     let i2c_driver = I2cDriver::new(i2c, sda, scl, &config)?;
 
     let mut scroll_pin = PinDriver::input(peripherals.pins.gpio25)?;
@@ -76,8 +76,6 @@ fn main() -> anyhow::Result<()> {
     screen_manager.switch_to_screen(1)?;
 
     loop {
-        scroll_button_source.poll();
-        select_button_source.poll();
 
         screen_manager.process_events()?;
 
